@@ -14,7 +14,14 @@
 listen_ip = "0.0.0.0"
 listen_port = 10004
 
+central_server= "http://cs302.pythonanywhere.com"
+
 import cherrypy
+
+import json
+import urllib2
+import hashlib
+import socket
 
 class MainApp(object):
 
@@ -37,81 +44,105 @@ class MainApp(object):
     @cherrypy.expose
     def index(self):
         print("def index(self):")
+        print self
         Page = "Welcome! This is a test website for COMPSYS302!<br/>"
         
         try:
-            Page += "Hello " + cherrypy.session['username'] + "!<br/>"
-            Page += "Here is some bonus text because you've logged in!"
-            Page += '<form action="/send" method="post" enctype="multipart/form-data">'
-            Page += 'Type: <input type="text" name="message"/>'
-            Page += '<input type="submit" value="send"/><br/></form>'
-            Page += cherrypy.session['message']                
-        except KeyError, e: #There is no username
-            if str(e) == "'username'" :
-                Page += "Click here to <a href='login'>login</a>."
-            elif str(e) == "'message'":
-                Page += "Type any message"
-                
+            Page += "Hello " + cherrypy.session['username'] + "!<br/><br/>"
+
+            Page += "Click here to list who is <a href='online'>online</a>.<br/>"
             
-        return Page
+        except KeyError, e: #There is no username
+            if str(e) == "'username'" or str(e) == "'password'":
+                Page += "Click here to <a href='login'>login</a>.<br/>"
+                
+        Page += "Click here to list <a href='API'>API</a>.<br/>"
+        Page += "Click here to list <a href='users'>Users</a>."
         
+        return Page
+
     @cherrypy.expose
-    def login(self):
-        print("def login(self):")
-        Page = '<form action="/signin" method="post" enctype="multipart/form-data">'
+    def API(self):
+        Page = "Here is the of external API that we can use from cs302.pythonanywhere.com <br/><br/>"
+        api = urllib2.urlopen(central_server + "/listAPI")
+        print api
+        return Page + api.read()
+
+    @cherrypy.expose
+    def users(self):
+        Page = "Here is the of username listed in cs302.pythonanywhere.com <br/><br/>"
+        user = urllib2.urlopen(central_server + "/listUsers")
+        print user
+        return Page + user.read()
+
+    @cherrypy.expose
+    @cherrypy.tools.json_in()
+    def online(self):
+        try:
+            username = cherrypy.session['username']
+            password = cherrypy.session['password']
+        except KeyError:
+            raise cherrypy.HTTPRedirect('/login?function=online')
+
+        login = urllib2.urlopen(
+            central_server + "/report" +
+            "?username=" + username +
+            "&password=" + password +
+            "&location=" + '2' +
+            "&ip=" + socket.gethostbyname(socket.gethostname()) +
+            "&port=" + "10004"
+            )
+        l = login.read()
+        if (l[0] == '0') :
+            req = urllib2.Request(
+                central_server + "/getList" +
+                "?username=" + username +
+                "&password=" + password +
+                "&enc=" + '0'+
+                "&json=" + '1'
+                )
+            result = urllib2.urlopen(req)
+            Page = "Here is the list who is online:<br/>"
+            
+            r = result.read()
+            data = json.loads(r)
+
+            for i in data:
+                for key, value in data[i].items():
+                    Page += key + ': ' + value + ', '
+                Page += '<br/>'
+            return Page
+        else :
+            raise cherrypy.HTTPRedirect('/login?function=online')
+    
+    @cherrypy.expose
+    def login(self, function='index'):
+        Page = '<form action="/signin?function='+ str(function) +'" method="post" enctype="multipart/form-data">'
         Page += 'Username: <input type="text" name="username"/><br/>'
-        Page += 'Password: <input type="text" name="password"/>'
+        Page += 'Password: <input type="password" name="password"/>'
         Page += '<input type="submit" value="Login"/></form>'
         return Page
     
-    @cherrypy.expose    
-    def sum(self, a=0, b=0): #All inputs are strings by default
-        print("def sum(self, a=0, b=0):")
-        output = int(a)+int(b)
-        return str(output)
-        
-    # LOGGING IN AND OUT
     @cherrypy.expose
-    def signin(self, username=None, password=None):
-        print("def signin(self, username=None, password=None):")
-        """Check their name and password and send them either to the main page, or back to the main login screen."""
-        error = self.authoriseUserLogin(username,password)
-        if (error == 0):
-            cherrypy.session['username'] = username;
-            raise cherrypy.HTTPRedirect('/')
-        else:
-            raise cherrypy.HTTPRedirect('/login')
-
-    @cherrypy.expose
-    def signout(self):
-        print("def signout(self):")
-        """Logs the current user out, expires their session"""
-        username = cherrypy.session.get('username')
-        if (username == None):
-            pass
-        else:
-            cherrypy.lib.sessions.expire()
-        raise cherrypy.HTTPRedirect('/')
-        
-    def authoriseUserLogin(self, username, password):
-        print("def authoriseUserLogin(self, username, password):")
-        print username
-        print password
-        if (username.lower() == "andrew") and (password.lower() == "password"):
-            return 0
-        else:
-            return 1
-
-    @cherrypy.expose
-    def send(self, message=None):
-        print "send()"
-        print message
-        message += '<br/>'
-        try:
-            cherrypy.session['message'] += message
-        except KeyError, e: #There is no username
-            cherrypy.session['message'] = message
-        raise cherrypy.HTTPRedirect('/')
+    def signin(self, username, password, function='index'):
+        salted = password + username
+        hashed = hashlib.sha256(salted.encode()).hexdigest()
+        result = urllib2.urlopen(
+            central_server + "/report" +
+            "?username=" + username +
+            "&password=" + hashed +
+            "&location=" + '2' +
+            "&ip=" + socket.gethostbyname(socket.gethostname()) +
+            "&port=" + "10004"
+            )
+        r = result.read()
+        #pubkey and encoding required.
+        if (r[0] == '0') :
+            cherrypy.session['username'] = username
+            cherrypy.session['password'] = hashed
+            raise cherrypy.HTTPRedirect('/' + str(function))
+        else :
+            return "failed to logic due to " + r
           
 def runMainApp():
     # Create an instance of MainApp and tell Cherrypy to send all requests under / to it. (ie all of them)
