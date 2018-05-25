@@ -11,7 +11,7 @@
 
 # The address we listen for connections on
 listen_ip = "0.0.0.0"
-listen_port = 10004
+listen_port = 10002
 my_location = '2'
 
 central_server= "http://cs302.pythonanywhere.com"
@@ -51,6 +51,7 @@ class MainApp(object):
         print self
         Page = "Welcome! This is a test website for COMPSYS302!<br/>"
         last = ""
+        last2 = ""
         try:
             Page += "Hello " + cherrypy.session['id'] + "!<br/><br/>"
 
@@ -58,6 +59,10 @@ class MainApp(object):
             Page += 'To: <input type="text" name="destination"/><br/>'
             Page += 'Message: <input type="text" name="message"/><br/>'
             Page += '<input type="submit" value="Send"/></form>'
+
+            last2 = '<form action="/onlineIndividual" method="post" enctype="multipart/form-data">'
+            last2 += 'online: <input type="text" name="username"/><br/>'
+            last2 += '<input type="submit" value="check"/></form>'
         
             Page += "Click here to list who is <a href='online'>online</a>.<br/>"
             last = "Click here to <a href='logoff'>log off</a>.<br/>"
@@ -67,7 +72,7 @@ class MainApp(object):
                 
         Page += "Click here to list <a href='API'>API</a>.<br/>"
         Page += "Click here to list <a href='users'>Users</a>.<br/>"
-        Page += last
+        Page += last + last2
         return Page
 
     @cherrypy.expose
@@ -90,6 +95,20 @@ class MainApp(object):
     def getUser(self):
         return urllib2.urlopen(central_server + "/listUsers")
 
+    @cherrypy.expose
+    def onlineIndividual(self, username):
+        myname = cherrypy.session['username']
+        password = cherrypy.session['password']
+        location = cherrypy.session['location']
+        ip = cherrypy.session['ip']
+        port = cherrypy.session['port']
+        key = cherrypy.session['key']
+        address = self.getUserAddress(username ,myname, password, location, ip, port, key)
+        if address == '3':
+            return 3
+        result = self.getUserAlive(address, myname)
+        return result
+        
     @cherrypy.expose
     def online(self):
         try:
@@ -175,10 +194,11 @@ class MainApp(object):
                    "message" : message,
                    "stamp" : time.time()
                }
-        req = urllib2.Request(address + '/receiveMessage', dict, {'Content-Type':'application/json'})
+        json_Data = json.dumps(dict)
+        req = urllib2.Request(address + '/receiveMessage', json_Data, {'Content-Type':'application/json'})
         result = urllib2.urlopen(req)
 
-        return result.read()
+        return result.read() + 'succeed i guess'
         
     # back node login server
     @cherrypy.expose
@@ -222,7 +242,7 @@ class MainApp(object):
         elif my_location == '2':
             ipnum = urllib2.urlopen('http://ip.42.pl/raw').read()
         ip = security.AES256encrypt(ipnum, login_pubkey)
-        port = security.AES256encrypt("10004", login_pubkey)
+        port = security.AES256encrypt(str(listen_port), login_pubkey)
         key = security.AES256encrypt(RSA1024_public ,login_pubkey)
         
         
@@ -260,16 +280,6 @@ class MainApp(object):
         except:
            return '1'
 
-        try:
-            username = cherrypy.session['username']
-            password = cherrypy.session['password']
-            location = cherrypy.session['location']
-            ip = cherrypy.session['ip']
-            port = cherrypy.session['port']
-            key = cherrypy.session['key']
-        except KeyError:
-            raise cherrypy.HTTPRedirect('/login?function=online')
-
         try :
             loader = open('message.log', 'rb')
             input_log = pickle.load(loader)
@@ -303,6 +313,11 @@ class MainApp(object):
             return '3'
 
         return 'http://' + userip + ':' + userport
+
+    def getUserAlive(self, address, sender):
+        req = urllib2.Request(address + '/ping?sender=' + sender)
+        result = urllib2.urlopen(req)
+        return result.read()
     
 def runMainApp():
     # Create an instance of MainApp and tell Cherrypy to send all requests under / to it. (ie all of them)
