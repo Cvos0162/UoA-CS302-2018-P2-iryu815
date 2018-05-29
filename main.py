@@ -12,18 +12,20 @@
 # The address we listen for connections on
 listen_ip = "0.0.0.0"
 listen_port = 10002
-my_location = '2'
+my_location = '1'
 
 central_server= "http://cs302.pythonanywhere.com"
 
 import cherrypy
-
+import sqlite3
 import json
 import urllib2
 import pickle
 import time
 import socket
-
+import Queue
+import threading
+from os.path import abspath
 import security
 
 class MainApp(object):
@@ -32,8 +34,8 @@ class MainApp(object):
     _cp_config = {'tools.encode.on': True, 
                   'tools.encode.encoding': 'utf-8',
                   'tools.sessions.on' : 'True',
-                 }                 
-
+                 }
+    
     # If they try somewhere we don't know, catch it here and send them to the right place.
     @cherrypy.expose
     def default(self, *args, **kwargs):
@@ -122,19 +124,39 @@ class MainApp(object):
             raise cherrypy.HTTPRedirect('/login?function=online')
 
         login = self.doReport(username, password, location, ip, port, key)
-        l = login.read()
-        if (l[0] == '0') :
+        if (login[0] == '0') :
             
             result = self.getOnline(username, password)
             Page = "Here is the list who is online:<br/><br/>"
             
+            connection = sqlite3.connect('data/online.db')
+            c = connection.cursor()
+            try :
+                c.execute('''CREATE TABLE tasks
+                     (username text, ip text, publicKey text, location real, LastLogin real, port real)''')
+            except :
+                c.execute('DELETE FROM tasks')
+            connection.commit()
             r = result.read()
             data = json.loads(r)
-            cherrypy.session['online'] = data
             for i in data:
                 for key, value in data[i].items():
                     Page += key + ': ' + value + ', '
                 Page += '<br/><br/>'
+                sql = '''INSERT INTO tasks(username, ip, publicKey, location, LastLogin, port)
+                            VALUES(?,?,?,?,?,?)'''
+                task = (
+                    data[i].get('username',''),
+                    data[i].get('ip',''),
+                    data[i].get('publicKey',''),
+                    data[i].get('location',''),
+                    data[i].get('LastLogin',''),
+                    data[i].get('port','')
+                    )
+                c.execute(sql,task)
+                connection.commit()
+                
+            connection.close()
             return Page + "<br/>Click here to go <a href='index'>home</a>.<br/>"
         else :
             raise cherrypy.HTTPRedirect('/login?function=online')
@@ -148,8 +170,10 @@ class MainApp(object):
                 "&json=" + security.AES256encrypt('1', '150ecd12d550d05ad83f18328e536f53')
                 )
         return urllib2.urlopen(req)
-
+    
+    reportTimer = None
     def doReport(self, username, password, location, ip, port, key):
+        print 'reporting'
         req = urllib2.Request(
             central_server + "/report" +
             "?username=" + username +
@@ -160,16 +184,17 @@ class MainApp(object):
             "&pubkey=" + key +
             "&enc=" + '1'
             )
-        return urllib2.urlopen(req)
-        
+        result = urllib2.urlopen(req).read()
+        if result[0] == '0':
+            self.reportTimer = threading.Timer(60, self.doReport, [username, password, location, ip, port, key])
+            self.reportTimer.setDaemon(True)
+            self.reportTimer.start()
+        return result
+    
     
     @cherrypy.expose
     def login(self, function='index'):
-        Page = '<form action="/signin?function='+ str(function) +'" method="post" enctype="multipart/form-data">'
-        Page += 'Username: <input type="text" name="username"/><br/>'
-        Page += 'Password: <input type="password" name="password"/>'
-        Page += '<input type="submit" value="Login"/></form>'
-        return Page + "<br/>Click here to go <a href='index'>home</a>.<br/>"
+        return file("media/LoginPage.html")
 
     @cherrypy.expose
     def send(self, destination, message):
@@ -188,22 +213,47 @@ class MainApp(object):
         if result.read() != '0':
             return 3
         
-        dict = {
+        Dict = {
                    "sender" : cherrypy.session['id'],
                    "destination" : destination,
                    "message" : message,
                    "stamp" : time.time()
                }
-        json_Data = json.dumps(dict)
-        req = urllib2.Request(address + '/receiveMessage', json_Data, {'Content-Type':'application/json'})
-        result = urllib2.urlopen(req)
-
-        return result.read() + 'succeed i guess'
+        json_Data = json.dumps(Dict)
+        req = urllib2.Request(address + '/receiveMessage', json_Data, {'Content-Type': 'application/json'})
+        result = urllib2.urlopen(req).read()
         
+        if result == '0':
+            if str(username) != str(destination):
+                self.storeMessage(Dict)
+                
+            raise cherrypy.HTTPRedirect('/read')
+        else :
+            return result
+
+    @cherrypy.expose
+    def read(self):
+        Page = ""
+        connection = sqlite3.connect('data/message.db')
+        c = connection.cursor()
+        for row in c.execute('SELECT * FROM tasks ORDER BY stamp DESC LIMIT 10'):
+            value = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(row[4]))
+            Page += "sender: " + row[1] + "<br/>"
+            Page += "destination: " + row[2] + "<br/>"
+            Page += "message: " + row[3] + "<br/>"
+            Page += "time: " + str(value) + "<br/>"
+            Page += "<br/>"
+            print row
+        connection.close()
+        return Page
+    
     # back node login server
     @cherrypy.expose
     def logoff(self):
-
+        try:
+            self.reportTimer.cancel()
+        except:
+            raise cherrypy.HTTPRedirect('/')
         username = cherrypy.session['username']
         password = cherrypy.session['password']
         req = urllib2.Request(
@@ -237,7 +287,7 @@ class MainApp(object):
         hashed = security.AES256encrypt(hashed, login_pubkey)
         location = security.AES256encrypt(my_location, login_pubkey)
         ipnum = ''
-        if my_location == '1':
+        if my_location == '1' or my_location == '0':
             ipnum = socket.gethostbyname(socket.gethostname())
         elif my_location == '2':
             ipnum = urllib2.urlopen('http://ip.42.pl/raw').read()
@@ -247,9 +297,7 @@ class MainApp(object):
         
         
         result = self.doReport(username, hashed, location, ip, port, key)
-
-        r = result.read()
-        if (r[0] == '0') :
+        if (result[0] == '0') :
             cherrypy.session['id'] = user_id
             cherrypy.session['username'] = username
             cherrypy.session['password'] = hashed
@@ -257,6 +305,7 @@ class MainApp(object):
             cherrypy.session['ip'] = ip
             cherrypy.session['port'] = port
             cherrypy.session['key'] = key
+            
             raise cherrypy.HTTPRedirect('/' + str(function))
         else :
             return "failed to logic due to " + r
@@ -270,6 +319,8 @@ class MainApp(object):
     @cherrypy.tools.json_in()
     def receiveMessage(self):
         input_data = cherrypy.request.json
+        print input_data
+        log = {}
         try:
            log = {
                    "sender" : input_data["sender"],
@@ -279,36 +330,46 @@ class MainApp(object):
                 }
         except:
            return '1'
-
-        try :
-            loader = open('message.log', 'rb')
-            input_log = pickle.load(loader)
-            loader.close()
-            log_id = input_log['id'] + 1
-        except :
-            log_id = '0'
-
-        input_log[log_id] = log
-        updater = open('message.log', 'wb')
-        pickle.dump(input_log, updater)
-        updater.close()
+        
+        self.storeMessage(log);
+        
         return '0'
+
+    def storeMessage(self, log):
+        connection = sqlite3.connect('data/message.db')
+        c = connection.cursor()
+        try:
+            c.execute('''CREATE TABLE tasks
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT, sender text, destination text, message text, stamp real)''')
+        except:
+            pass
+            
+        task = (
+            log.get("sender",''),
+            log.get("destination",''),
+            log.get("message",''),
+            log.get("stamp",'')
+            )
+        
+        sql = '''INSERT INTO tasks(sender, destination, message, stamp)
+            VALUES(?,?,?,?)'''
+                
+        c.execute(sql,task)
+        connection.commit()
+        connection.close()
 
     def getUserAddress(self, User, username, password, location, ip, port, key):
         userip = None
         userport = None
         login = self.doReport(username, password, location, ip, port, key)
-        l = login.read()
-        if (l[0] == '0') :
+        if (login[0] == '0') :
             result = self.getOnline(username, password)            
             r = result.read()
             data = json.loads(r)
-            cherrypy.session['online'] = data
             for i in data:
                 if data[i]['username'] == User:
                     userip = data[i]['ip']
                     userport = data[i]['port']
-                        
         if userip == None or userport == None:
             return '3'
 
@@ -321,18 +382,25 @@ class MainApp(object):
     
 def runMainApp():
     # Create an instance of MainApp and tell Cherrypy to send all requests under / to it. (ie all of them)
-    cherrypy.tree.mount(MainApp(), "/")
+    cherrypy.tree.mount(MainApp(), "/",
+                        {'/media': {
+                            'tools.staticdir.on': True,
+                            'tools.staticdir.dir': abspath('./media')
+                            }
+                        }
+                        )
 
     # Tell Cherrypy to listen for connections on the configured address and port.
     cherrypy.config.update({'server.socket_host': listen_ip,
                             'server.socket_port': listen_port,
-                            'engine.autoreload.on': True,
-                           })
+                            'engine.autoreload.on': True
+                            }
+                            )
 
     print "========================="
     print "University of Auckland"
     print "COMPSYS302 - Software Design Application"
-    print "========================================"                       
+    print "========================================"
     
     # Start the web server
     cherrypy.engine.start()
