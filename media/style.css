@@ -1,0 +1,133 @@
+html,body {
+    background-color: #F2F2F2;
+    font-size: 15px;
+    font-family: "serif";
+}
+
+iframe {
+    background-color: #FDFDFD;
+    border: 0;
+    border-style: None;
+    border-radius: 12px;
+    width : 33%;
+    height : 100%;
+}
+
+object{
+    border:0;
+    border-style: None;
+    max-width:100%;
+}
+
+div {
+    padding:1% 5%;
+    background-color: #FDFDFD;
+
+    border: 3px;
+    border-style: solid;
+    border-radius: 12px;
+    border-color: #F0F0F0;
+
+    margin: auto;
+}
+hr {
+  display: block;
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+  margin-left: auto;
+  margin-right: auto;
+  border-style: inset;
+  border-width: 1px;
+}
+
+.login_container{
+  position: absolute;
+  top:0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+
+  max-width:400px;
+  max-height:300px;
+}
+
+.frame{
+  border: 0px;
+  border-style: None;
+  border-radius: 12px;
+  background-color: #FDFDFD;
+
+  min-width:200px;
+  width:90%;
+  height : 69%;
+}
+.message{
+  background-color: #FDFDFD;
+  padding: 0px;
+  border: 0px;
+  margin:0px;
+  border-style: None;
+  border-radius: 0px;
+  width : 100%;
+  height:auto;
+}
+.buttons{
+  text-align:left;
+  background-color: #FDFDFD;
+  float: left;
+  border: 0px;
+  border-style: None;
+  border-radius: 12px;
+  border-color: #F0F0F0;
+  padding:1% 1%;
+  margin: 5px;
+  width: 21%;
+  height: 100%;
+}
+.empty{
+  background-color: #F2F2F2;
+  width: 100%;
+  height : 21%;
+  margin: auto;
+  border: 0;
+  padding: 0;
+}
+.profilepic{
+  max-width: 50%;
+}
+input,
+.btn {
+  width: 90%;
+  padding: 12px;
+  border: 1px;
+  border-style: solid;
+  border-radius: 4px;
+  border-color: #F0F0F0;
+  margin: 5px 0;
+  opacity: 0.85;
+  display: inline-block;
+  font-size: 15px;
+  line-height: 20px;
+}
+input[type=submit]{
+  text-align : center;
+  background-color: #00457D;
+  color: white;
+  cursor: pointer;
+}
+input[type=text], input[type=password]{
+  background-color: white;
+}
+@media screen and (max-width: 450px) {
+  html,body {
+    background-color: #FDFDFD;
+    font-family: "serif";
+  }
+  * {
+    background-color: #FDFDFD;
+  }
+  .login_container {
+    max-width:450px;
+    border-color: #FDFDFD;
+  }
+}

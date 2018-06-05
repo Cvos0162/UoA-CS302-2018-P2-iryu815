@@ -3,6 +3,7 @@ from Crypto.Cipher import XOR
 from Crypto.PublicKey import RSA
 from Crypto import Random
 import binascii
+import base64
 import urllib2
 import hashlib
 import bcrypt
@@ -18,8 +19,11 @@ def XORdecrypt(enc, key):
     cipher = XOR.new(key)
     return cipher.decrypt(enc)
 
-def AES256keygen():
+def AES256randkeygen():
     return binascii.hexlify(os.urandom(16))
+
+def AES256keygen(password, salt):
+    return binascii.hexlify(password, salt)
 
 def AES256encrypt(raw, key):
     raw += ' ' * (16 - len(raw) % 16)
@@ -36,8 +40,8 @@ def AES256decrypt(enc, key):
 
 def RSAkeygen(num):
     new = RSA.generate(num, Random.new().read)
-    public = binascii.hexlify(new.publickey().exportKey())
-    private = binascii.hexlify(new.exportKey())
+    public = binascii.hexlify(new.publickey().exportKey('DER'))
+    private = binascii.hexlify(new.exportKey('DER'))
     return public, private
 
 def RSAimportKey(key):
@@ -56,6 +60,12 @@ def percentEncode(raw):
 
 def percentDecode(enc):
     return urllib2.unquote(enc)
+
+def base64Encode(raw):
+    return base64.encodestring(raw)
+
+def base64Decode(enc):
+    return base64.decodestring(enc)
 
 def SHA256hash(message, salt=''):
     return hashlib.sha256((message + salt).encode()).hexdigest()
@@ -90,7 +100,7 @@ def test():
     print 'AES256 dec: ' + AES256decrypt(aes, loginkey)
     print ''
 
-    aeskey = AES256keygen()
+    aeskey = AES256randkeygen()
     aes = AES256encrypt(message, aeskey)
     print 'with keygen: ', aeskey
     print 'AES256 enc: ' + aes
