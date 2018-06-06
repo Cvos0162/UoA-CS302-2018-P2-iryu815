@@ -148,7 +148,7 @@ class MainApp(object):
     def getUser(self):
         return urllib2.urlopen(central_server + "/listUsers")
 
-    # request ping
+    # see if user is online by ping
     @cherrypy.expose
     def onlineIndividual(self, username):
         myname = cherrypy.session['username']
@@ -358,6 +358,7 @@ class MainApp(object):
 <body>
 '''+'falied!'
 
+    #send message
     @cherrypy.expose
     def send(self, destination, message):
         address = self.getUserAddress(destination)
@@ -382,6 +383,7 @@ class MainApp(object):
         else :
             return result
 
+    #send file
     @cherrypy.expose
     def sendFile(self, destination, myfile):
         data = myfile.file.read()
@@ -409,6 +411,7 @@ class MainApp(object):
         else :
             return result
 
+    #read message page
     @cherrypy.expose
     def read(self):
         print 'reading message'
@@ -443,6 +446,7 @@ class MainApp(object):
         
         return Page
 
+    #read message page
     @cherrypy.expose
     def readFile(self):
         print 'reading file'
@@ -472,6 +476,7 @@ class MainApp(object):
         connection.close()
         
         return Page
+    #edit profile page
     @cherrypy.expose
     def editProfile(self):
         Page = '''<head>
@@ -488,6 +493,7 @@ class MainApp(object):
         Page += '<input type="submit" value="Done"/></form>'
         return Page
 
+    #save profile when edit
     @cherrypy.expose
     def saveProfile(self, name='', position='', description='', location='', f=None):
         log = {}
@@ -517,7 +523,8 @@ class MainApp(object):
             log['lastUpdated'] = time.time()
             self.storeProfile(log)
         raise cherrypy.HTTPRedirect('/readProfile?username=' + cherrypy.session['id'])
-            
+
+    #read profile of any user / gets other people's profile
     @cherrypy.expose
     def readProfile(self, username):
         Page = '''<head>
@@ -593,6 +600,7 @@ class MainApp(object):
         return Page + '''<div class="buttons"><form action="/" method="GET" enctype="multipart/form-data">
 <input type="submit" value="GO Home"/></form></div>'''
 
+    #getProfile API
     @cherrypy.expose
     @cherrypy.tools.json_in()
     def getProfile(self):
@@ -635,6 +643,7 @@ class MainApp(object):
 
         return json.dumps(log)
 
+    #store profile into database
     def storeProfile(self, log):
         connection = sqlite3.connect('data/data.db')
         c = connection.cursor()
@@ -739,7 +748,7 @@ class MainApp(object):
         connection.commit()
         connection.close()
 
-    # back node login server
+    #report logoff
     @cherrypy.expose
     def logoff(self):
         print 'logging off!!'
@@ -767,7 +776,8 @@ class MainApp(object):
         except:
             raise cherrypy.HTTPRedirect('/login')
         raise cherrypy.HTTPRedirect('/')
-    
+
+    #signin
     @cherrypy.expose
     def signin(self, username, password, function='index'):
 
@@ -834,10 +844,12 @@ class MainApp(object):
             return "failed to logic due to " + result
 
     # back node p2p server
+    # Ping
     @cherrypy.expose
     def ping(self, sender):
         return '0'
 
+    #getPublickey API
     @cherrypy.expose
     @cherrypy.tools.json_in()
     def getPublicKey(self):
@@ -855,6 +867,7 @@ class MainApp(object):
         output = json.dumps(dic)
         return output
 
+    #request acknowledge API of other node
     @cherrypy.expose
     def requestAcknowledge(self, sender, stamp, destination, message):
         Page = '''<head>
@@ -881,6 +894,7 @@ class MainApp(object):
         else:
             return Page + 'not acknowledged'
 
+    #acknowledge API
     @cherrypy.expose
     @cherrypy.tools.json_in()
     def acknowledge(self):
@@ -933,7 +947,8 @@ class MainApp(object):
             return '7'
         else:
             return '0'
-        
+
+    #handshake API
     @cherrypy.expose
     @cherrypy.tools.json_in()
     def handshake(self):
@@ -968,6 +983,7 @@ class MainApp(object):
         data = json.dumps({'error':error, 'message':message})
         return data
 
+    #request acknowledge delete to other node
     @cherrypy.expose
     def requestDelete(self, sender, destination, message, stamp):
         Page = '''<head>
@@ -1102,6 +1118,7 @@ class MainApp(object):
         else:
             return Page + 'could not delete the message'
 
+    #acknowledge Delete API
     @cherrypy.expose
     @cherrypy.tools.json_in()
     def acknowledgeDelete(self):
@@ -1222,6 +1239,7 @@ class MainApp(object):
             connection.close()
             return '0'
 
+    #receiveMessage API
     @cherrypy.expose
     @cherrypy.tools.json_in()
     def receiveMessage(self):
@@ -1288,6 +1306,7 @@ class MainApp(object):
         self.storeMessage(log)
         return '0'
 
+    #stores Message into data base
     def storeMessage(self, log):
         connection = sqlite3.connect('data/data.db')
         c = connection.cursor()
@@ -1311,6 +1330,7 @@ class MainApp(object):
         connection.commit()
         connection.close()
 
+    #recieveFile API
     @cherrypy.expose
     @cherrypy.tools.json_in()
     def receiveFile(self):
@@ -1400,6 +1420,7 @@ class MainApp(object):
 
         return '0'
 
+    #store log of received file into database
     def storeFilelog(self, log):
         connection = sqlite3.connect('data/data.db')
         c = connection.cursor()
@@ -1424,6 +1445,7 @@ class MainApp(object):
         connection.commit()
         connection.close()
 
+    #get user address from database
     def getUserAddress(self, user):
         userip = ''
         userport = ''
@@ -1438,11 +1460,13 @@ class MainApp(object):
             return ''
         return 'http://' + userip + ':' + userport
 
+    #request ping
     def getUserAlive(self, address, sender):
         req = urllib2.Request(address + '/ping?sender=' + sender)
         result = urllib2.urlopen(req)
         return result.read()
 
+    #get public key in the database
     def getUserPubkey(self, user):
         pubkey = ''
         try:
@@ -1454,16 +1478,6 @@ class MainApp(object):
         except:
             pass
         return pubkey
-
-    def getUserEncryption(self, user):
-        add = getUserAddress(user)
-        if add == '':
-            return 0
-        
-        pass
-    
-    def getUserHashing(self, user):
-        pass
     
 def runMainApp():
     # Create an instance of MainApp and tell Cherrypy to send all requests under / to it. (ie all of them)
