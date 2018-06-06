@@ -1,10 +1,9 @@
 #!/usr/bin/python
-""" cherrypy_example.py
-
-    COMPSYS302 - Software Design
-    Author: In Ha Ryu (iryu815@auckland.ac.nz)
-
-    This program uses the CherryPy web server (from www.cherrypy.org).
+"""
+main.py
+The main function for the COMPSYS302 python project
+Author: In Ha Ryu (iryu815@auckland.ac.nz)
+This program uses the CherryPy web server (from www.cherrypy.org).
 """
 # Requires:  CherryPy 3.2.2  (www.cherrypy.org)
 #            Python  (We use 2.7)
@@ -14,9 +13,13 @@
 listen_ip = "0.0.0.0"
 listen_port = 10002
 
+# login server name
 central_server= "http://cs302.pythonanywhere.com"
+
+#key for encryption and decryption of database
 data_key = 'f920f9a760c6f8142de9d57502c8d9ed'
 
+#import
 import cherrypy
 import sqlite3
 import json
@@ -33,8 +36,10 @@ import text
 import pyotp
 
 class MainApp(object):
-
+    #authenticator value
     totp = pyotp.TOTP("7BFIOWJ4CTPI6N4M")
+
+    #session
     session = []
     session_keydic = { 'public':'',
                'private':''}
@@ -71,6 +76,7 @@ class MainApp(object):
         buttons = ''
         
         try:
+            #if no error on session['id'] make html
             name = cherrypy.session['id']
 
             buttons += '<div class="empty">'
@@ -120,24 +126,29 @@ class MainApp(object):
 '''
         return Page
 
+    # page that calls list of api of login server
     @cherrypy.expose
     def API(self):
         Page = "Here is the of external API that we can use from cs302.pythonanywhere.com <br/><br/>"
         api = self.getAPI()
         return Page + api.read() + "<br/>Click here to go <a href='index'>home</a>.<br/>"
 
+    # calls list of api of login server
     def getAPI(self):
         return urllib2.urlopen(central_server + "/listAPI")
     
+    # page that calls list of api of login server
     @cherrypy.expose
     def users(self):
         Page = "Here is the of username listed in cs302.pythonanywhere.com <br/><br/>"
         user = self.getUser()
         return Page + user.read() + "<br/>Click here to go <a href='index'>home</a>.<br/>"
 
+    # calls list of users of login server
     def getUser(self):
         return urllib2.urlopen(central_server + "/listUsers")
 
+    # request ping
     @cherrypy.expose
     def onlineIndividual(self, username):
         myname = cherrypy.session['username']
@@ -146,12 +157,14 @@ class MainApp(object):
             return 3
         result = self.getUserAlive(address, myname)
         return result
-        
+
+    # page that retrieves the current online users
     @cherrypy.expose
     def online(self):
         print "getting online"
         username = ''
         password = ''
+        #html header
         Page = '''<head>
     <link rel="stylesheet" type="text/css" href="media/embedded.css"/>
     <base target="_parent" />
@@ -159,6 +172,7 @@ class MainApp(object):
 </head>
 <body>
 '''
+        #request list from login server
         try:
             username = cherrypy.session['username']
             password = cherrypy.session['password']
@@ -169,9 +183,11 @@ class MainApp(object):
             r = result.read()
             data = json.loads(r)
         except:
+            #when no result
             return Page + 'login server is down'
         Page += "Here is the list who is online:<br/><br/>"
 
+        #database create and reset
         connection = sqlite3.connect('data/data.db')
         c = connection.cursor()
         try :
@@ -180,14 +196,15 @@ class MainApp(object):
         except :
             c.execute('DELETE FROM online')
         connection.commit()
-        
+
+        #insert online users and their information to database
         for i in data:
             sql = '''INSERT INTO online(username, ip, publicKey, location, lastLogin, port)
                     VALUES(?,?,?,?,?,?)'''
             task = (
-                security.AES256encrypt(str(data[i].get('username','')), data_key),
-                security.AES256encrypt(str(data[i].get('ip','')), data_key),
-                security.AES256encrypt(str(data[i].get('publicKey','')), data_key),
+                security.AES256encrypt(data[i].get('username',''.encode('utf-8')), data_key),
+                security.AES256encrypt(data[i].get('ip','').encode('utf-8'), data_key),
+                security.AES256encrypt(data[i].get('publicKey','').encode('utf-8'), data_key),
                 security.AES256encrypt(str(data[i].get('location','')), data_key),
                 security.AES256encrypt(str(data[i].get('lastLogin','')), data_key),
                 security.AES256encrypt(str(data[i].get('port','')), data_key)
@@ -195,6 +212,7 @@ class MainApp(object):
             c.execute(sql,task)
             connection.commit()
 
+        # get 10 of most recent messages 
         for row in c.execute('SELECT * FROM online ORDER BY username ASC'):
             value = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(security.AES256decrypt(row[4], data_key))))
             Page += "<div class='message'>username: <a href='/readProfile?username="+ text.html_escape(security.AES256decrypt(row[0], data_key))+"'>" + text.html_escape(security.AES256decrypt(row[0], data_key)) + "</a><br/>"
@@ -206,6 +224,7 @@ class MainApp(object):
         
         return Page
 
+    # request of online user list
     def getOnline(self, username, password):
         try:
             req = urllib2.Request(
@@ -219,14 +238,17 @@ class MainApp(object):
         except:
             result = 0
         return result
-    
+
+    #timer
     reportTimer = None
+    #report to the login server
     def doReport(self, username, password, location, ip, port, key):
         print 'reporting'
         try:
             self.reportTimer.cancel()
         except:
             pass
+        # request
         req = urllib2.Request(
             central_server + "/report" +
             "?username=" + username +
@@ -238,21 +260,25 @@ class MainApp(object):
             "&enc=" + '1'
             )
         result = urllib2.urlopen(req).read()
+        #timer upon succuess
         if result[0] == '0':
             self.reportTimer = threading.Timer(60, self.doReport, [username, password, location, ip, port, key])
             self.reportTimer.setDaemon(True)
             self.reportTimer.start()
         return result
     
-    
+    #login page
     @cherrypy.expose
     def login(self, function='index'):
         return file("media/LoginPage.html")
 
+    #encryption username ans password so it does not appear on url
     @cherrypy.expose
     def enclogin(self, username, password, function='index'):
+        #encrypt
         user = security.AES256encrypt(username, data_key)
         pas = security.AES256encrypt(password, data_key)
+        #determinds show the qr code if user has experinced any login then don't show
         connection = sqlite3.connect('data/data.db')
         c = connection.cursor()
         try:
@@ -275,14 +301,17 @@ class MainApp(object):
             show = '0'
         connection.close()
         raise cherrypy.HTTPRedirect('/login2FA?username='+user+'&password='+pas+'&show='+show)
-    
+
+    #2FA page
     @cherrypy.expose
     def login2FA(self, username, password, show, function='index'):
+        #header
         Page = '''<head>
     <link rel="stylesheet" type="text/css" href="media/style.css"/>
     </head>
     <body>
 '''
+        #address of qr code
         add = ('https://chart.googleapis.com/chart?'
             + 'cht='
             + 'qr'
@@ -294,9 +323,12 @@ class MainApp(object):
             
         Page += '<div class="MFA" align = "center">'
         if str(show) == '1':
+            #show qr on page
             Page += '<img src="'+add+'"/>'
         else:
+            # else show other img
             Page += '<img src="https://media.giphy.com/media/GR81UZYyhN3Ww/giphy.gif">'
+        # page button
         Page += '<form action="/login2FAsignin">'
         Page += '<h2 align = "left">2FA Code</h2>'
         Page += '<input name="username" type="hidden" value="'+username+'">'
@@ -310,6 +342,7 @@ class MainApp(object):
         
         return Page
 
+    #check authentication of 2FA
     @cherrypy.expose
     def login2FAsignin(self, username, password, code):
         print self.totp.now()

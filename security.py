@@ -1,3 +1,10 @@
+'''
+security.py
+ALl the encoding, encryption and hashing method required for COMPSYS302 python project.
+author : "iryu815"
+'''
+
+#import
 from Crypto.Cipher import AES
 from Crypto.Cipher import XOR
 from Crypto.PublicKey import RSA
@@ -10,6 +17,7 @@ import bcrypt
 import scrypt
 import os
 
+#encryption and decryption
 def XORencrypt(raw, key):
     cipher = XOR.new(key)
     return binascii.hexlify(cipher.encrypt(raw))
@@ -59,6 +67,7 @@ def RSAdecrypt(enc, key):
     enc = binascii.unhexlify(enc)
     return key.decrypt(enc)
 
+#encoding and decoding
 def percentEncode(raw):
     return urllib2.quote(raw)
 
@@ -71,6 +80,7 @@ def base64Encode(raw):
 def base64Decode(enc):
     return base64.decodestring(enc)
 
+#hashing
 def SHA256hash(message, salt=''):
     return hashlib.sha256((message + salt).encode()).hexdigest()
 
@@ -83,6 +93,7 @@ def bcryptHash(message, salt):
 def scryptHash(message, salt):
     return scrypt.hash(message, salt)
 
+#To test all the function above
 def test():
     message = 'message = love'
     salt = 'all'
