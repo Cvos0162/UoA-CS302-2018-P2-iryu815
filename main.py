@@ -21,6 +21,7 @@ import cherrypy
 import sqlite3
 import json
 import urllib2
+import urllib
 import pickle
 import time
 import socket
@@ -29,17 +30,20 @@ import threading
 from os.path import abspath
 import security
 import text
+import pyotp
 
 class MainApp(object):
 
+    totp = pyotp.TOTP("7BFIOWJ4CTPI6N4M")
     session = []
-    
+    session_keydic = { 'public':'',
+               'private':''}
     #CherryPy Configuration
     _cp_config = {'tools.encode.on': True, 
                   'tools.encode.encoding': 'utf-8',
                   'tools.sessions.on' : 'True',
                  }
-    
+    #subscribe to log off when cherrypy stops
     def __init__(self):
         cherrypy.engine.subscribe('stop', self.logoff)
         
@@ -55,14 +59,17 @@ class MainApp(object):
     # User nodes
     @cherrypy.expose
     def index(self):
+        #header
         Page = '''<html>
   <head>
     <link rel="stylesheet" type="text/css" href="media/style.css"/>
   </head>
   <body>
 '''
+        #declare variable
         frame = ""
         buttons = ''
+        
         try:
             name = cherrypy.session['id']
 
@@ -145,15 +152,6 @@ class MainApp(object):
         print "getting online"
         username = ''
         password = ''
-        try:
-            username = cherrypy.session['username']
-            password = cherrypy.session['password']
-        except KeyError:
-            pass
-
-        result = self.getOnline(username, password)
-        r = result.read()
-        data = json.loads(r)
         Page = '''<head>
     <link rel="stylesheet" type="text/css" href="media/embedded.css"/>
     <base target="_parent" />
@@ -161,6 +159,17 @@ class MainApp(object):
 </head>
 <body>
 '''
+        try:
+            username = cherrypy.session['username']
+            password = cherrypy.session['password']
+        except KeyError:
+            pass
+        result = self.getOnline(username, password)
+        try:
+            r = result.read()
+            data = json.loads(r)
+        except:
+            return Page + 'login server is down'
         Page += "Here is the list who is online:<br/><br/>"
 
         connection = sqlite3.connect('data/data.db')
@@ -188,7 +197,7 @@ class MainApp(object):
 
         for row in c.execute('SELECT * FROM online ORDER BY username ASC'):
             value = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(security.AES256decrypt(row[4], data_key))))
-            Page += "<div class='message'>username: <a href='/readProfile?username="+ security.AES256decrypt(row[0], data_key)+"'>" + text.html_escape(security.AES256decrypt(row[0], data_key)) + "</a><br/>"
+            Page += "<div class='message'>username: <a href='/readProfile?username="+ text.html_escape(security.AES256decrypt(row[0], data_key))+"'>" + text.html_escape(security.AES256decrypt(row[0], data_key)) + "</a><br/>"
             Page += "lastLogin: " + text.html_escape(str(value)) + "<br/>"
             Page += "<br/></div>"
         
@@ -198,14 +207,18 @@ class MainApp(object):
         return Page
 
     def getOnline(self, username, password):
-        req = urllib2.Request(
-                central_server + "/getList" +
-                "?username=" + username +
-                "&password=" + password +
-                "&enc=" + '1'+
-                "&json=" + security.AES256encrypt('1', '150ecd12d550d05ad83f18328e536f53')
-                )
-        return urllib2.urlopen(req)
+        try:
+            req = urllib2.Request(
+                    central_server + "/getList" +
+                    "?username=" + username +
+                    "&password=" + password +
+                    "&enc=" + '1'+
+                    "&json=" + security.AES256encrypt('1', '150ecd12d550d05ad83f18328e536f53')
+                    )
+            result = urllib2.urlopen(req)
+        except:
+            result = 0
+        return result
     
     reportTimer = None
     def doReport(self, username, password, location, ip, port, key):
@@ -235,6 +248,82 @@ class MainApp(object):
     @cherrypy.expose
     def login(self, function='index'):
         return file("media/LoginPage.html")
+
+    @cherrypy.expose
+    def enclogin(self, username, password, function='index'):
+        user = security.AES256encrypt(username, data_key)
+        pas = security.AES256encrypt(password, data_key)
+        connection = sqlite3.connect('data/data.db')
+        c = connection.cursor()
+        try:
+            c.execute('''CREATE TABLE loggedin
+                    (username TEXT PRIMARY KEY)''')
+            connection.commit()
+        except:
+            pass
+        data = 0
+        try:
+            data = c.execute('''SELECT COUNT(*) FROM loggedin
+                            WHERE username = ?''', (username, )).fetchone()[0]
+            print data
+            print username
+        except:
+            pass
+        
+        show = '1'
+        if data != 0:
+            show = '0'
+        connection.close()
+        raise cherrypy.HTTPRedirect('/login2FA?username='+user+'&password='+pas+'&show='+show)
+    
+    @cherrypy.expose
+    def login2FA(self, username, password, show, function='index'):
+        Page = '''<head>
+    <link rel="stylesheet" type="text/css" href="media/style.css"/>
+    </head>
+    <body>
+'''
+        add = ('https://chart.googleapis.com/chart?'
+            + 'cht='
+            + 'qr'
+            + '&chs=' 
+            + str(400)
+            + '&chl='
+            + security.percentEncode(pyotp.totp.TOTP('7BFIOWJ4CTPI6N4M').provisioning_uri("@COMPSYS302", issuer_name="Secure App"))
+               )
+            
+        Page += '<div class="MFA" align = "center">'
+        if str(show) == '1':
+            Page += '<img src="'+add+'"/>'
+        else:
+            Page += '<img src="https://media.giphy.com/media/GR81UZYyhN3Ww/giphy.gif">'
+        Page += '<form action="/login2FAsignin">'
+        Page += '<h2 align = "left">2FA Code</h2>'
+        Page += '<input name="username" type="hidden" value="'+username+'">'
+        Page += '<input name="password" type="hidden" value="'+password+'">'
+        Page += '''
+        <input type="text" name="code" placeholder="code" required>
+        <hr>
+        <input type="submit" value="Submit">
+      </form></div>
+'''
+        
+        return Page
+
+    @cherrypy.expose
+    def login2FAsignin(self, username, password, code):
+        print self.totp.now()
+        print code
+        if self.totp.now() == code:
+            user = security.AES256decrypt(username, data_key)
+            pas = security.AES256decrypt(password, data_key)
+            raise cherrypy.HTTPRedirect('/signin?username='+user+'&password='+pas)
+        else:
+            return '''<head>
+<meta http-equiv="refresh" content="5; URL=/login">
+</head>
+<body>
+'''+'falied!'
 
     @cherrypy.expose
     def send(self, destination, message):
@@ -305,11 +394,17 @@ class MainApp(object):
             pass
         
         for row in c.execute('SELECT * FROM message ORDER BY id DESC LIMIT 10'):
-            value = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(security.AES256decrypt(row[4], data_key))))
-            Page += "<div class='message'>sender: " + text.html_escape(security.AES256decrypt(row[1], data_key)) + "<br/>"
-            Page += "destination: " + text.html_escape(security.AES256decrypt(row[2], data_key)) + "<br/>"
-            Page += "message: " + text.html_escape(security.AES256decrypt(row[3], data_key)) + "<br/>"
+            stamp = security.AES256decrypt(row[4], data_key)
+            value = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(stamp)))
+            user = security.AES256decrypt(row[1], data_key)
+            dest = security.AES256decrypt(row[2], data_key)
+            message = security.AES256decrypt(row[3], data_key).decode('utf-8')
+            Page += "<div class='message'>sender: " + text.html_escape(user) + "<br/>"
+            Page += "destination: " + text.html_escape(dest) + "<br/>"
+            Page += "message: " + text.html_escape(message) + "<br/>"
             Page += "time: " + text.html_escape(str(value)) + "<br/>"
+            Page += '<a href="/requestDelete?sender='+text.html_escape(user)+'&destination='+text.html_escape(dest)+'&message='+ text.html_escape(message) + '&stamp='+ text.html_escape(stamp) +'">delete</a><br/>'
+            Page += '<a href="/requestAcknowledge?sender='+text.html_escape(cherrypy.session['id'])+'&destination='+text.html_escape(user) + '&stamp=' + text.html_escape(stamp) + '&message=' + text.html_escape(message)+ '">acknowledge</a><br/>'
             Page += "<br/></div>"
         connection.close()
         
@@ -337,8 +432,8 @@ class MainApp(object):
             Page += "<div class='message'>sender: " + text.html_escape(security.AES256decrypt(row[1],data_key)) + "<br/>"
             Page += "destination: " + text.html_escape(security.AES256decrypt(row[2], data_key)) + "<br/>"
             Page += "time: " + text.html_escape(str(value)) + "<br/>"
-            Page += 'filename: <a href="download/'+security.AES256decrypt(row[3], data_key)+'">' + text.html_escape(security.AES256decrypt(row[3], data_key)) + '</a><br/>'
-            Page += '<object data="' + 'download/' + security.AES256decrypt(row[3],data_key) + '" type="' + security.AES256decrypt(row[4], data_key) + '" max-width="400px" height="auto">'
+            Page += 'filename: <a href="download/'+text.html_escape(security.AES256decrypt(row[3], data_key))+'">' + text.html_escape(security.AES256decrypt(row[3], data_key)) + '</a><br/>'
+            Page += '<object data="' + 'download/' + text.html_escape(security.AES256decrypt(row[3],data_key)) + '" type="' + text.html_escape(security.AES256decrypt(row[4], data_key)) + '" max-width="400px" height="auto">'
             Page += '</object>'
             Page += "</div><br/>"
         connection.close()
@@ -397,6 +492,10 @@ class MainApp(object):
 </head>
 <body>
 '''
+        try:
+            cherrypy.session['id']
+        except:
+            raise cherrypy.HTTPRedirect('/login')
         if username != cherrypy.session['id']:
             try:
                 print 'calling'
@@ -409,6 +508,14 @@ class MainApp(object):
                 req = urllib2.Request(address + '/getProfile', json_Data, {'Content-Type': 'application/json'})
                 result = urllib2.urlopen(req).read()
                 log = json.loads(result)
+                try:
+                    file_name = log['picture'].split('/')[-1]
+                    file_content = file_name.split('.')[-1]
+                    direc = 'profile/'+username+'.'+file_content
+                    result = urllib.urlretrieve(log['picture'],direc)
+                    log['picture'] = direc
+                except:
+                    pass
                 log['username'] = username
                 self.storeProfile(log)
             except:
@@ -421,13 +528,31 @@ class MainApp(object):
             row = c.execute('SELECT * FROM profile WHERE username = ?', (security.AES256encrypt(str(username), data_key),)).fetchone()
             value = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(security.AES256decrypt(row[6], data_key))))
             Page += "<div class='message'> Username: " + text.html_escape(security.AES256decrypt(row[0], data_key)) + "<br/>"
-            Page += "Name: " + text.html_escape(security.AES256decrypt(row[1], data_key)) + "<br/>"
-            Page += "Position: " + text.html_escape(security.AES256decrypt(row[2], data_key)) + "<br/>"
-            Page += "Description: " + text.html_escape(security.AES256decrypt(row[3], data_key)) + "<br/>"
-            Page += "Location: " + text.html_escape(security.AES256decrypt(row[4], data_key)) + "<br/>"
-            Page += '<img class="profilepic" src="'+ security.AES256decrypt(row[5], data_key) + '" height="auto" alt="image unavailable">'
-            Page += '</img><br/>'
-            Page += "Last Update date: " + str(value) + "<br/>"
+            try:
+                Page += "Name: " + text.html_escape(security.AES256decrypt(row[1], data_key)) + "<br/>"
+            except:
+                pass
+            try:
+                Page += "Position: " + text.html_escape(security.AES256decrypt(row[2], data_key)) + "<br/>"
+            except:
+                pass
+            try:
+                Page += "Description: " + text.html_escape(security.AES256decrypt(row[3], data_key)) + "<br/>"
+            except:
+                pass
+            try:
+                Page += "Location: " + text.html_escape(security.AES256decrypt(row[4], data_key)) + "<br/>"
+            except:
+                pass
+            try:
+                Page += '<img class="profilepic" src="'+ text.html_escape(security.AES256decrypt(row[5], data_key)) + '" height="auto" alt="image unavailable">'
+                Page += '</img><br/>'
+            except:
+                pass
+            try:
+                Page += "Last Update date: " + str(value) + "<br/>"
+            except:
+                pass
             Page += "</div><br/>"
             connection.close()
         except :
@@ -616,8 +741,9 @@ class MainApp(object):
         user_id = username
 
         login_pubkey = '150ecd12d550d05ad83f18328e536f53'
-        RSA1024_public, RSA1024_private = security.RSAkeygen(1024)
-        
+        keydic = security.RSAkeygen(1024)
+        self.session_keydic['public'] = keydic['public']
+        self.session_keydic['private'] = keydic['private']
         hashed = security.SHA256hash(password, username)
         username = security.AES256encrypt(username, login_pubkey)
         hashed = security.AES256encrypt(hashed, login_pubkey)
@@ -638,7 +764,7 @@ class MainApp(object):
         
         ip = security.AES256encrypt(ipnum, login_pubkey)
         port = security.AES256encrypt(str(listen_port), login_pubkey)
-        key = security.AES256encrypt(RSA1024_public ,login_pubkey)
+        key = security.AES256encrypt(self.session_keydic['public'] ,login_pubkey)
         
         
         result = self.doReport(username, hashed, location, ip, port, key)
@@ -652,8 +778,23 @@ class MainApp(object):
             cherrypy.session['ip'] = ip
             cherrypy.session['port'] = port
             cherrypy.session['key'] = key
-            cherrypy.session['pubkey'] = RSA1024_public
-            cherrypy.session['prikey'] = RSA1024_private
+
+            connection = sqlite3.connect('data/data.db')
+            c = connection.cursor()
+            try:
+                c.execute('''CREATE TABLE loggedin
+                                            (username TEXT PRIMARY KEY)''')
+                connection.commit()
+            except:
+                pass
+            try:
+                c.execute('''INSERT INTO loggedin(username)
+                                            VALUES(?)''', (user_id,))
+                connection.commit()
+            except:
+                pass
+            connection.close()
+        
             
             raise cherrypy.HTTPRedirect('/' + str(function))
         else :
@@ -671,16 +812,41 @@ class MainApp(object):
         error = 0
         try:
             input_data['sender']
-            if input_data['username'] != cherrypy.session['id']:
-                error = 3
+            input_data['username']
         except:
             error = 1
         pubkey = ''
         if error == 0:
-            pubkey = cherrypy.session['pubkey']
+            pubkey = self.session_keydic['public']
         dic = {'error': error, 'pubkey':pubkey}
         output = json.dumps(dic)
         return output
+
+    @cherrypy.expose
+    def requestAcknowledge(self, sender, stamp, destination, message):
+        Page = '''<head>
+<meta http-equiv="refresh" content="5; URL=/read">
+</head>
+<body>
+'''
+        dic ={
+                'sender':sender,
+                'stamp':stamp,
+                'destination':destination,
+                'hashing':3,
+                'hash': security.SHA512hash(message, sender)
+            }
+        add = self.getUserAddress(destination)
+        result = ''
+        try:
+            req = urllib2.Request(add + '/acknowledge', json.dumps(dic), {'Content-Type': 'application/json'})
+            result = json.loads(urllib2.urlopen(req).read())
+        except:
+            return Page + 'not acknowledged'
+        if str(result)[0] == '0':
+            return Page + 'acknowledged'
+        else:
+            return Page + 'not acknowledged'
 
     @cherrypy.expose
     @cherrypy.tools.json_in()
@@ -713,6 +879,7 @@ class MainApp(object):
                                 )
                             ).fetchone()
             message = security.AES256decrypt(result[3], data_key)
+            connection.close()
         except:
             return '4'
         hashed = ''
@@ -757,16 +924,270 @@ class MainApp(object):
             elif encryption == 2:
                 message = security.AES256decrypt(message,'41fb5b5ae4d57c5ee528adb078ac3b2e')
             elif encryption == 3:
-                key = security.RSAimportKey(cherrypy.session['prikey'])
+                key = security.RSAimportKey(self.session_keydic['private'])
                 message = security.RSAdecrypt(message, key)
             elif encryption == 4 or encryption == 5:
-                key = security.RSAimportKey(cherrypy.session['prikey'])
+                key = security.RSAimportKey(self.session_keydic['private'])
                 decryptionKey = security.RSAdecrypt(input_data['decryptionKey'], key)
                 message = security.AES256decrypt(message, decryptionKey)
         except:
             error = 1
-        data = json.dump({'error':error, 'message':message})
+        data = json.dumps({'error':error, 'message':message})
         return data
+
+    @cherrypy.expose
+    def requestDelete(self, sender, destination, message, stamp):
+        Page = '''<head>
+<meta http-equiv="refresh" content="5; URL=/read">
+</head>
+<body>
+'''
+        if cherrypy.session['id'] == sender and sender == destination:
+            try:
+                connection = sqlite3.connect('data/data.db')
+                c = connection.cursor()
+                arg1 = security.AES256encrypt(sender, data_key)
+                arg2 = security.AES256encrypt(destination, data_key)
+                arg3 = security.AES256encrypt(str(stamp), data_key)
+                c.execute('DELETE FROM message WHERE sender = ? AND destination = ? AND stamp = ?',
+                      (
+                         arg1, arg2, arg3,
+                          )
+                      )
+                connection.commit()
+                connection.close()
+            except:
+                pass
+            raise cherrypy.HTTPRedirect('/read')
+        address = ''
+        if cherrypy.session['id'] != destination :
+            address = self.getUserAddress(destination)
+        else:
+            address = self.getUserAddress(sender)
+        result1 = ''
+        pubkey = ''
+        try:
+            print 'trying to get pubkey'
+            if cherrypy.session['id'] != destination :
+                req = urllib2.Request(address + '/getPublicKey', json.dumps({'sender':cherrypy.session['id'],'username':destination}), {'Content-Type': 'application/json'})
+            else :
+                req = urllib2.Request(address + '/getPublicKey', json.dumps({'sender':cherrypy.session['id'],'username':sender}), {'Content-Type': 'application/json'})
+                
+            result1 = json.loads(urllib2.urlopen(req).read())
+            print result1
+            if str(result1['error'])[0] == '0':
+                print 'getPublicKey is safe'
+                pubkey = result1['pubkey']
+            else :
+                if cherrypy.session['id'] != destination :
+                    pubkey = self.getUserPubkey(destination)
+                else :
+                    pubkey = self.getUserPubkey(sender)
+        except:
+            print 'cannot reach the target'
+            if cherrypy.session['id'] != destination :
+                pubkey = self.getUserPubkey(destination)
+            else :
+                pubkey = self.getUserPubkey(sender)
+        print pubkey
+        if pubkey == '':
+            return Page + 'pubkey is not available'
+        key = security.RSAimportKey(pubkey)
+        
+        try:
+            print 'trying to handshake'
+            if cherrypy.session['id'] != destination :
+                req = urllib2.Request(address + '/handshake',
+                                   json.dumps({
+                                      'message':security.RSAencrypt('this is message',key),
+                                      'sender':cherrypy.session['id'],
+                                      'destination':destination,
+                                      'encryption':3
+                                      }), {'Content-Type': 'application/json'})
+            else:
+                req = urllib2.Request(address + '/handshake',
+                                   json.dumps({
+                                      'message':security.RSAencrypt('this is message',key),
+                                      'sender':cherrypy.session['id'],
+                                      'destination':sender,
+                                      'encryption':3
+                                      }), {'Content-Type': 'application/json'})
+            result3 = json.loads(urllib2.urlopen(req).read())
+            print result3
+            if str(result3['error'])[0] == '0':
+                if result3['message'] != 'this is message':
+                    return Page + 'this node does not support decryption, unsafe to request delete'
+        except:
+            return Page + 'this node does not support handshake'
+        dic = {}
+        if cherrypy.session['id'] == destination:
+            dic = {
+                'sender' : cherrypy.session['id'],
+                'destination' : sender,
+                'stamp' : security.RSAencrypt(str(stamp),key),
+                'hashing' : 2,
+                'hash' : security.RSAencrypt(security.SHA256hash(message, cherrypy.session['id']), key),
+                'encryption' : 3
+                }
+        else :
+            dic = {
+                'sender' : cherrypy.session['id'],
+                'destination' : destination,
+                'stamp' : security.RSAencrypt(str(stamp),key),
+                'hashing' : 2,
+                'hash' : security.RSAencrypt(security.SHA256hash(message, cherrypy.session['id']), key),
+                'encryption' : 3
+                }
+        print security.SHA256hash(message, sender)
+        print str(stamp)
+        print dic
+        json_Data = json.dumps(dic)
+        result2 = ''
+        try:
+            req = urllib2.Request(address + '/acknowledgeDelete', json_Data, {'Content-Type': 'application/json'})
+            result2 = urllib2.urlopen(req).read()
+        except:
+            return Page + 'cannot reach the target'
+        print result2
+        if str(result2)[0] == '0':
+            try:
+                connection = sqlite3.connect('data/data.db')
+                c = connection.cursor()
+                arg1 = security.AES256encrypt(sender, data_key)
+                arg2 = security.AES256encrypt(destination, data_key)
+                arg3 = security.AES256encrypt(str(stamp), data_key)
+                c.execute('DELETE FROM message WHERE sender = ? AND destination = ? AND stamp = ?',
+                      (
+                         arg1, arg2, arg3,
+                          )
+                      )
+                connection.commit()
+                connection.close()
+            except:
+                pass
+            raise cherrypy.HTTPRedirect('/read')
+        else:
+            return Page + 'could not delete the message'
+
+    @cherrypy.expose
+    @cherrypy.tools.json_in()
+    def acknowledgeDelete(self):
+        input_data = cherrypy.request.json
+        sender = ''
+        destination = ''
+        stamp = ''
+        hashing = ''
+        givenHash = ''
+        encryption = ''
+        dataMatching = False
+        try:
+            sender = input_data["sender"]
+            destination = input_data["destination"]
+            stamp = input_data["stamp"]
+            hashing = input_data["hashing"]
+            givenHash = input_data['hash']
+            encryption = input_data['encryption']
+        except:
+            return '1'
+        try:
+            if encryption == 1 or encryption == 2:
+                return '1'
+            elif input_data['encryption'] == 3:
+                key = security.RSAimportKey(self.session_keydic['private'])
+                givenHash = security.RSAdecrypt(givenHash, key)
+                stamp = security.RSAdecrypt(stamp, key)
+            elif input_data['encryption'] == 4 or input_data['encryption'] == 5:
+                key = security.RSAimportKey(self.session_keydic['private'])
+                decryptionKey = security.RSAdecrypt(input_data['decryptionKey'], key)
+                givenHash = security.AES256decrypt(givenHash, decryptionKey)
+                stamp = security.AES256decrypt(stamp, decryptionKey)
+        except:
+            return '1'
+        #find matching stamp sender destination
+        message = ''
+        arg1 = ''
+        arg2 = ''
+        arg3 = ''
+        connection = sqlite3.connect('data/data.db')
+        c = connection.cursor()
+        error1 = ''
+        error2 = ''
+        print sender
+        print destination
+        print stamp
+        print givenHash
+        try:
+            arg1 = security.AES256encrypt(sender, data_key)
+            arg2 = security.AES256encrypt(destination, data_key)
+            arg3 = security.AES256encrypt(str(stamp), data_key)
+            result = c.execute('SELECT * FROM message WHERE sender = ? AND destination = ? AND stamp = ?',
+                            (
+                                arg1, arg2, arg3,
+                                )
+                            ).fetchone()
+            message = security.AES256decrypt(result[3], data_key)
+            connection.close()
+        except:
+            error1 = '4'
+        try:
+            arg1 = security.AES256encrypt(sender, data_key)
+            arg2 = security.AES256encrypt(destination, data_key)
+            arg3 = security.AES256encrypt(str(stamp), data_key)
+            result = c.execute('SELECT * FROM message WHERE sender = ? AND destination = ? AND stamp = ?',
+                            (
+                                arg2, arg1, arg3,
+                                )
+                            ).fetchone()
+            message = security.AES256decrypt(result[3], data_key)
+            connection.close()
+        except:
+            error2 = '4'
+        if error1 == '4' and error2 == '4':
+            return '4'
+        
+        try:
+            hashed = ''
+            if hashing == 0:
+                givenHash = ''
+            elif hashing == 1:
+                hashed = security.SHA256hash(message)
+            elif hashing == 2:
+                hashed = security.SHA256hash(message, sender)
+            elif hashing == 3:
+                hashed = security.SHA512hash(message, sender)
+            elif hashing == 4:
+                hashed = security.bcryptHash(message, sender)
+            elif hashing == 5:
+                hashed = security.scryptHash(message, sender)
+            if hashed != givenHash:
+                return '7'
+            else :        
+                dataMatching = True
+        except:
+            return '7'
+        if dataMatching == True:
+            print 'deleting from destination'
+            connection = sqlite3.connect('data/data.db')
+            c = connection.cursor()
+            try:
+                c.execute('DELETE FROM message WHERE sender = ? AND destination = ? AND stamp = ?',
+                      (
+                          arg1, arg2, arg3,
+                          )
+                      )
+            except:
+                pass
+            try:
+                c.execute('DELETE FROM message WHERE sender = ? AND destination = ? AND stamp = ?',
+                      (
+                          arg2, arg1, arg3,
+                          )
+                      )
+            except:
+                pass
+            connection.commit()
+            connection.close()
+            return '0'
 
     @cherrypy.expose
     @cherrypy.tools.json_in()
@@ -794,12 +1215,12 @@ class MainApp(object):
                 stamp = security.AES256decrypt(stamp,'41fb5b5ae4d57c5ee528adb078ac3b2e')
                 givenHash = security.AES256decrypt(input_data.get('hash',''),'41fb5b5ae4d57c5ee528adb078ac3b2e')
             elif input_data['encryption'] == 3:
-                key = security.RSAimportKey(cherrypy.session['prikey'])
+                key = security.RSAimportKey(self.session_keydic['private'])
                 message = security.RSAdecrypt(message, key)
                 stamp = security.RSAdecrypt(stamp, key)
                 givenHash = security.RSAdecrypt(input_data.get('hash',''), key)
             elif input_data['encryption'] == 4 or input_data['encryption'] == 5:
-                key = security.RSAimportKey(cherrypy.session['prikey'])
+                key = security.RSAimportKey(self.session_keydic['private'])
                 decryptionKey = security.RSAdecrypt(input_data['decryptionKey'], key)
                 message = security.AES256decrypt(message, decryptionKey)
                 stamp = security.AES256decrypt(stamp, decryptionKey)
@@ -892,14 +1313,14 @@ class MainApp(object):
                 stamp = security.AES256decrypt(stamp,'41fb5b5ae4d57c5ee528adb078ac3b2e')
                 givenHash = security.AES256decrypt(input_data.get('hash',''),'41fb5b5ae4d57c5ee528adb078ac3b2e')
             elif input_data['encryption'] == 3:
-                key = security.RSAimportKey(cherrypy.session['prikey'])
+                key = security.RSAimportKey(self.session_keydic['private'])
                 content = security.RSAdecrypt(content, key)
                 filename = security.RSAdecrypt(filename, key)
                 content_type = security.RSAdecrypt(content_type, key)
                 stamp = security.RSAdecrypt(stamp, key)
                 givenHash = security.RSAdecrypt(input_data.get('hash',''), key)
             elif input_data['encryption'] == 4 or input_data['encryption'] == 5:
-                key = security.RSAimportKey(cherrypy.session['prikey'])
+                key = security.RSAimportKey(self.session_keydic['private'])
                 decryptionKey = security.RSAdecrypt(input_data['decryptionKey'], key)
                 content = security.AES256decrypt(content, decryptionKey)
                 filename = security.AES256decrypt(filename, decryptionKey)
@@ -996,11 +1417,20 @@ class MainApp(object):
             c = connection.cursor()
             row = c.execute('SELECT * FROM online WHERE username = ?', (security.AES256encrypt(user,data_key),)).fetchone()
             pubkey = security.AES256decrypt(row[2], data_key)
-            
             connection.close()
         except:
             pass
         return pubkey
+
+    def getUserEncryption(self, user):
+        add = getUserAddress(user)
+        if add == '':
+            return 0
+        
+        pass
+    
+    def getUserHashing(self, user):
+        pass
     
 def runMainApp():
     # Create an instance of MainApp and tell Cherrypy to send all requests under / to it. (ie all of them)

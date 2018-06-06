@@ -40,12 +40,16 @@ def AES256decrypt(enc, key):
 
 def RSAkeygen(num):
     new = RSA.generate(num, Random.new().read)
+    dic = {'public' : '', 'private' : ''}
     public = binascii.hexlify(new.publickey().exportKey('DER'))
     private = binascii.hexlify(new.exportKey('DER'))
-    return public, private
+    dic['public'] = public
+    dic['private'] = private
+    return dic
 
 def RSAimportKey(key):
-    return RSA.importKey(binascii.unhexlify(key))
+    result = RSA.importKey(binascii.unhexlify(key))
+    return result
 
 def RSAencrypt(raw, key):
     cipher = key.publickey()
@@ -77,7 +81,7 @@ def bcryptHash(message, salt):
     return bcrypt.hashpw(message, salt)
 
 def scryptHash(message, salt):
-    return binascii.hexlify(scrypt.hash(message, salt))
+    return scrypt.hash(message, salt)
 
 def test():
     message = 'message = love'
@@ -107,19 +111,19 @@ def test():
     print 'AES256 dec: ' + AES256decrypt(aes, aeskey)
     print ''
     
-    pub, pri = RSAkeygen(1024)
-    print 'RSA1024 pubkey: ', pub
-    print 'RSA1024 prikey: ', pri
-    rsa = RSAencrypt(message, RSAimportKey(pub))
+    key = RSAkeygen(1024)
+    print 'RSA1024 pubkey: ', key['public']
+    print 'RSA1024 prikey: ', key['private']
+    rsa = RSAencrypt(message, RSAimportKey( key['public']))
     print 'RSA1024 pubenc: ', rsa
-    print 'RSA1024 pridec: ', RSAdecrypt(rsa, RSAimportKey(pri))
+    print 'RSA1024 pridec: ', RSAdecrypt(rsa, RSAimportKey(key['private']))
     print ''
-    pub, pri = RSAkeygen(2048)
-    print 'RSA2048 pubkey: ', pub
-    print 'RSA2048 prikey: ', pri
-    rsa = RSAencrypt(message, RSAimportKey(pub))
+    key = RSAkeygen(2048)
+    print 'RSA2048 pubkey: ', key['public']
+    print 'RSA2048 prikey: ', key['private']
+    rsa = RSAencrypt(message, RSAimportKey(key['public']))
     print 'RSA2048 enc: ', rsa
-    print 'RSA2048 dec: ', RSAdecrypt(rsa, RSAimportKey(pri))
+    print 'RSA2048 dec: ', RSAdecrypt(rsa, RSAimportKey(key['private']))
     print ''
     per = percentEncode(message)
     print 'Percent enc: ' + per
