@@ -1,3 +1,9 @@
+The overall goal of this project is to design a simple peer-to-peer social media network:
+	1. Allowing a user to log into the system.
+	2. The system can automatically find other users on other computers.
+	3. User can create and maintain a simple profile page.
+	4. Users can send messages, images, audio, and PDFfiles to each other.
+
 To install we must install the external library.
 run following command on the terminal
 	$ make install
